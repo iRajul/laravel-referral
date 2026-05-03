@@ -2,6 +2,8 @@
 
 namespace Jijunair\LaravelReferral\Traits;
 
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 use Jijunair\LaravelReferral\Models\Referral;
 
@@ -10,9 +12,9 @@ trait Referrable
     /**
      * Get the referrals associated with the user.
      *
-     * @return \Illuminate\Database\Eloquent\Relations\HasMany
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<Referral, $this>
      */
-    public function referrals()
+    public function referrals(): HasMany
     {
         return $this->hasMany(Referral::class, 'referrer_id');
     }
@@ -20,89 +22,73 @@ trait Referrable
     /**
      * Get the referral account of the user.
      *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     * @return \Illuminate\Database\Eloquent\Relations\HasOne<Referral, $this>
      */
-    public function referralAccount()
+    public function referralAccount(): HasOne
     {
-        return $this->belongsTo(Referral::class, 'id', 'user_id');
+        return $this->hasOne(Referral::class, 'user_id');
     }
 
     /**
      * Check if the user has a referral account.
-     *
-     * @return bool
      */
-    public function hasReferralAccount()
+    public function hasReferralAccount(): bool
     {
-        return !is_null($this->referralAccount);
+        return ! is_null($this->referralAccount);
     }
 
     /**
      * Get the referral link for the user.
-     *
-     * @return string
      */
-    public function getReferralLink()
+    public function getReferralLink(): string
     {
-        if ($this->hasReferralAccount()) {
-            return url('/') . "/" . config('referral.route_prefix') . "/" . $this->getReferralCode();
+        if (! $this->hasReferralAccount()) {
+            return '';
         }
-        return "";
+
+        return url('/').'/'.trim((string) config('referral.route_prefix'), '/').'/'.$this->getReferralCode();
     }
 
     /**
      * Get the referral code of the user's referral account.
-     *
-     * @return string|null
      */
-    public function getReferralCode()
+    public function getReferralCode(): ?string
     {
         if ($this->hasReferralAccount()) {
             return $this->referralAccount->referral_code;
         }
-        
+
         return null;
     }
 
     /**
      * Create a referral account for the user.
-     *
-     * @param  int|null  $referrerID
-     * @return void
      */
-    public function createReferralAccount(int $referrerID = NULL)
+    public function createReferralAccount(?int $referrerID = null): void
     {
-
-        $prefix = config('referral.ref_code_prefix');
-        $length = config('referral.referral_length');
+        $prefix = (string) config('referral.ref_code_prefix', '');
+        $length = (int) config('referral.referral_length', 8);
         $referralCode = $this->generateUniqueReferralCode($prefix, $length);
 
-        $ref = new Referral;
-        $ref->user_id = $this->getKey();
-        $ref->referrer_id = $referrerID;
-        $ref->referral_code = $referralCode;
-        $ref->save();
+        Referral::query()->create([
+            'user_id' => $this->getKey(),
+            'referrer_id' => $referrerID,
+            'referral_code' => $referralCode,
+        ]);
     }
 
     /**
      * Generate a unique referral code.
-     *
-     * @param  string  $prefix
-     * @param  int  $length
-     * @return string
      */
-    private function generateUniqueReferralCode($prefix, $length)
+    private function generateUniqueReferralCode(string $prefix, int $length): string
     {
         $prefix = strtolower($prefix);
-        // Generate an initial referral code
-        $code = $prefix . strtolower(Str::random($length));
+        $code = $prefix.strtolower(Str::random($length));
 
-        // Check if the generated code already exists in the database
-        while (Referral::where('referral_code', $code)->exists()) {
-            // If code already exists, generate a new one until a unique code is found
-            $code = $prefix . strtolower(Str::random($length));
+        while (Referral::query()->where('referral_code', $code)->exists()) {
+            $code = $prefix.strtolower(Str::random($length));
         }
-        
+
         return $code;
     }
 }

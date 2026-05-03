@@ -2,43 +2,40 @@
 
 namespace Jijunair\LaravelReferral\Controllers;
 
-use App\Http\Controllers\Controller;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Cookie;
 
 class ReferralController extends Controller
 {
     /**
      * Assign a referral code to the user.
-     *
-     * @param  string  $referralCode
-     * @return RedirectResponse
      */
-    public function assignReferrer($referralCode)
+    public function assignReferrer(string $referralCode): RedirectResponse
     {
-        $refCookieName = config('referral.cookie_name');
-        $refCookieExpiry = config('referral.cookie_expiry');
+        $refCookieName = (string) config('referral.cookie_name');
+        $refCookieExpiry = (int) config('referral.cookie_expiry');
+
         if (Cookie::has($refCookieName)) {
-            // Referral code cookie already exists, redirect to configured route
             return redirect()->route(config('referral.redirect_route'));
-        } else {
-            // Create a referral code cookie and redirect to configured route
-            $ck = Cookie::make($refCookieName, $referralCode, $refCookieExpiry);
-            return redirect()->route(config('referral.redirect_route'))->withCookie($ck);
         }
+
+        $cookie = Cookie::make($refCookieName, $referralCode, $refCookieExpiry);
+
+        return redirect()->route(config('referral.redirect_route'))->withCookie($cookie);
     }
 
     /**
      * Generate referral codes for existing users.
-     *
-     * @return JsonResponse
      */
-    public function createReferralCodeForExistingUsers()
+    public function createReferralCodeForExistingUsers(): JsonResponse
     {
         $userModel = resolve(config('referral.user_model'));
         $users = $userModel::cursor();
 
         foreach ($users as $user) {
-            if (!$user->hasReferralAccount()) {
+            if (! $user->hasReferralAccount()) {
                 $user->createReferralAccount();
             }
         }

@@ -1,71 +1,92 @@
 <?php
 
-use Tests\TestCase;
-use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Cookie;
+namespace Jijunair\LaravelReferral\Tests;
+
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Jijunair\LaravelReferral\Models\Referral;
+use Jijunair\LaravelReferral\Tests\Fixtures\User;
 
 class ReferralControllerTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function testAssignReferrerWithExistingCookie()
+    public function test_assign_referrer_sets_referral_cookie(): void
     {
-        // Create a dummy referral code
-        $referralCode = 'ABC123';
+        $response = $this->get('/save20/ABC123');
 
-        // Set a dummy referral code cookie
-        Cookie::queue(config('referral.cookie_name'), $referralCode);
-
-        // Define the route for assigning a referrer
-        Route::middleware('web')->get(config('referral.route_prefix') . '/{referralCode}', [ReferralController::class, 'assignReferrer'])
-            ->name('referralLink');
-
-        // Call the route with the referral code
-        $response = $this->get(route('referralLink', ['referralCode' => $referralCode]));
-
-        // Assert that the response redirects to the configured route
-        $response->assertRedirect(config('referral.redirect_route'));
+        $response
+            ->assertRedirect(route('home'))
+            ->assertCookie(config('referral.cookie_name'), 'ABC123');
     }
 
-    public function testAssignReferrerWithoutExistingCookie()
+    public function test_assign_referrer_keeps_existing_referral_cookie(): void
     {
-        // Create a dummy referral code
-        $referralCode = 'ABC123';
+        $response = $this
+            ->withCookie(config('referral.cookie_name'), 'OLD123')
+            ->get('/save20/NEW123');
 
-        // Define the route for assigning a referrer
-        Route::middleware('web')->get(config('referral.route_prefix') . '/{referralCode}', [ReferralController::class, 'assignReferrer'])
-            ->name('referralLink');
-
-        // Call the route with the referral code
-        $response = $this->get(route('referralLink', ['referralCode' => $referralCode]));
-
-        // Assert that the response redirects to the configured route
-        $response->assertRedirect(config('referral.redirect_route'));
-
-        // Assert that the referral code cookie has been set
-        $this->assertTrue(Cookie::has(config('referral.cookie_name')));
+        $response
+            ->assertRedirect(route('home'))
+            ->assertCookieMissing(config('referral.cookie_name'));
     }
 
-    public function testCreateReferralCodeForExistingUsers()
+    public function test_create_referral_code_for_existing_users(): void
     {
-        // Create some dummy users
-        $users = factory(config('referral.user_model'), 5)->create();
+        $users = collect(range(1, 5))
+            ->map(fn (int $number): User => User::query()->create([
+                'name' => "User {$number}",
+                'email' => "user{$number}@example.test",
+            ]));
 
-        // Define the route for generating referral codes for existing users
-        Route::middleware('web')->get('generate-ref-accounts', [ReferralController::class, 'createReferralCodeForExistingUsers'])
-            ->name('generateReferralCodes');
+        $response = $this->get('/generate-ref-accounts');
 
-        // Call the route to generate referral codes for existing users
-        $response = $this->get(route('generateReferralCodes'));
+        $response
+            ->assertOk()
+            ->assertJson(['message' => 'Referral codes generated for existing users.']);
 
-        // Assert that the response is a JSON response
-        $response->assertJson(['message' => 'Referral codes generated for existing users.']);
-
-        // Assert that referral codes have been created for all existing users
         foreach ($users as $user) {
+            $user->refresh();
+
             $this->assertTrue($user->hasReferralAccount());
             $this->assertNotNull($user->getReferralCode());
         }
+    }
+
+    public function test_referrable_trait_creates_account_with_optional_referrer(): void
+    {
+        $referrer = User::query()->create([
+            'name' => 'Referrer',
+            'email' => 'referrer@example.test',
+        ]);
+
+        $user = User::query()->create([
+            'name' => 'Referred',
+            'email' => 'referred@example.test',
+        ]);
+
+        $user->createReferralAccount($referrer->getKey());
+
+        $this->assertDatabaseHas('referrals', [
+            'user_id' => $user->getKey(),
+            'referrer_id' => $referrer->getKey(),
+        ]);
+
+        $this->assertSame($referrer->getKey(), $user->refresh()->referralAccount->referrer_id);
+    }
+
+    public function test_user_can_be_resolved_by_referral_code(): void
+    {
+        $user = User::query()->create([
+            'name' => 'Code Owner',
+            'email' => 'owner@example.test',
+        ]);
+
+        Referral::query()->create([
+            'user_id' => $user->getKey(),
+            'referral_code' => 'ref_abc123',
+        ]);
+
+        $this->assertTrue($user->is(Referral::userByReferralCode('ref_abc123')));
+        $this->assertNull(Referral::userByReferralCode('missing'));
     }
 }

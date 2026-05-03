@@ -25,7 +25,7 @@ return [
     'redirect_route' => 'orders.create',
 
     // The model class for the user
-    'user_model' => 'App\Models\User',
+    'user_model' => \App\Models\User::class,
 
     // The length of the referral code generated for each user
     'referral_length' => 8,
